@@ -13,9 +13,11 @@ from telegram.ext import (
 import nest_asyncio
 import asyncio
 
+# Estados e dados temporários por usuário
 user_states = {}
 temp_data = {}
 
+# Banco de dados
 def get_db():
     return sqlite3.connect("megasena.db")
 
@@ -30,6 +32,7 @@ def init_db():
             )
         ''')
 
+# Teclados principais
 def teclado_principal():
     buttons = [
         [KeyboardButton("➕ Adicionar Jogo")],
@@ -41,6 +44,7 @@ def teclado_principal():
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
+# Validação das dezenas
 def validar_dezenas(texto):
     try:
         nums = [int(d) for d in texto.replace(" ", "").split(",")]
@@ -50,35 +54,54 @@ def validar_dezenas(texto):
     except:
         return None
 
+# API da Caixa para último resultado
 async def obter_ultimo_resultado():
     url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena"
-    headers = {"Accept": "application/json"}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                dezenas = data["listaDezenasSorteadasOrdemSorteio"]
-                concurso = data["numero"]
-                data_sorteio = data["dataApuracao"]
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Origin": "https://www.loterias.caixa.gov.br",
+        "Referer": "https://www.loterias.caixa.gov.br/"
+    }
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    return None, None, None
+                data = await resp.json(content_type=None)
+                dezenas = data.get("listaDezenasSorteadasOrdemSorteio") or data.get("listaDezenas")
+                concurso = data.get("numero")
+                data_sorteio = data.get("dataApuracao")
                 return concurso, dezenas, data_sorteio
-    return None, None, None
+    except:
+        return None, None, None
 
+# Resultado por concurso
 async def obter_resultado_concurso(concurso_num):
     url = f"https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena/{concurso_num}"
-    headers = {"Accept": "application/json"}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                dezenas = data.get("listaDezenasSorteadasOrdemSorteio")
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Origin": "https://www.loterias.caixa.gov.br",
+        "Referer": "https://www.loterias.caixa.gov.br/"
+    }
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    return None, None
+                data = await resp.json(content_type=None)
+                dezenas = data.get("listaDezenasSorteadasOrdemSorteio") or data.get("listaDezenas")
                 data_sorteio = data.get("dataApuracao")
                 return dezenas, data_sorteio
-    return None, None
+    except:
+        return None, None
+
+# Handlers do bot
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🎉 Olá! Bem-vindo ao *Bot Mega-Sena*!\n\n"
-        "Use o menu abaixo para começar.",
+        "🎉 Olá! Bem-vindo ao *Bot Mega-Sena*!\n\nUse o menu abaixo para começar.",
         reply_markup=teclado_principal(),
         parse_mode="Markdown"
     )
@@ -92,8 +115,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if texto == "➕ Adicionar Jogo":
         user_states[uid] = "aguardando_dezenas"
-        await update.message.reply_text("Digite as 6 dezenas separadas por vírgula (ex: 04,15,23,33,40,56):")
-        temp_data[uid] = {}
+        await update.message.reply_text("Digite 6 dezenas separadas por vírgula:")
 
     elif texto == "📋 Listar Jogos":
         with get_db() as conn:
@@ -113,11 +135,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif texto == "📅 Resultado por Concurso":
         user_states[uid] = "aguardando_concurso"
-        await update.message.reply_text("Digite o número do concurso que deseja consultar:")
+        await update.message.reply_text("Digite o número do concurso:")
 
     elif texto == "📂 Conferir com Concurso Passado":
-        user_states[uid] = "aguardando_concurso_para_conferir"
-        await update.message.reply_text("Digite o número do concurso com o qual deseja conferir seus jogos:")
+        user_states[uid] = "aguardando_conferencia_passada"
+        await update.message.reply_text("Digite o número do concurso para conferir seus jogos:")
 
     elif texto == "❌ Excluir Jogo":
         with get_db() as conn:
@@ -130,50 +152,45 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif estado == "aguardando_dezenas":
         dezenas_validas = validar_dezenas(texto)
-        if not dezenas_validas or len(dezenas_validas) != 6:
-            await update.message.reply_text("❌ Formato inválido. Digite 6 números entre 1 e 60 separados por vírgula.")
+        if not dezenas_validas:
+            await update.message.reply_text("❌ Dezenas inválidas. Digite 6 números de 1 a 60.")
             return
         dezenas_str = ",".join(f"{d:02d}" for d in dezenas_validas)
         with get_db() as conn:
-            conn.execute(
-                "INSERT INTO jogos (user_id, dezenas, data_cadastro) VALUES (?, ?, ?)",
-                (uid, dezenas_str, datetime.datetime.now().isoformat())
-            )
+            conn.execute("INSERT INTO jogos (user_id, dezenas, data_cadastro) VALUES (?, ?, ?)",
+                         (uid, dezenas_str, datetime.datetime.now().isoformat()))
         await update.message.reply_text(f"✅ Jogo cadastrado: {dezenas_str}", reply_markup=teclado_principal())
         user_states.pop(uid, None)
-        temp_data.pop(uid, None)
 
     elif estado == "aguardando_concurso":
         try:
-            concurso_num = int(texto)
+            concurso = int(texto)
         except:
-            await update.message.reply_text("❌ Número de concurso inválido. Tente novamente.")
+            await update.message.reply_text("Número inválido.")
             return
-        dezenas, data_sorteio = await obter_resultado_concurso(concurso_num)
-        if dezenas is None:
-            await update.message.reply_text("❌ Concurso não encontrado ou ainda não realizado.")
+        dezenas, data_sorteio = await obter_resultado_concurso(concurso)
+        if dezenas:
+            await update.message.reply_text(f"🎯 Resultado #{concurso} ({data_sorteio}): {', '.join(dezenas)}")
         else:
-            dezenas_fmt = ", ".join(dezenas)
-            await update.message.reply_text(f"🎯 Resultado Concurso #{concurso_num} - {data_sorteio}\nDezenas sorteadas: {dezenas_fmt}")
+            await update.message.reply_text("Concurso não encontrado.")
         user_states.pop(uid, None)
 
-    elif estado == "aguardando_concurso_para_conferir":
+    elif estado == "aguardando_conferencia_passada":
         try:
-            concurso_num = int(texto)
+            concurso = int(texto)
         except:
-            await update.message.reply_text("❌ Número de concurso inválido. Tente novamente.")
+            await update.message.reply_text("Número inválido.")
             return
-        dezenas_sorteadas, data_sorteio = await obter_resultado_concurso(concurso_num)
-        if dezenas_sorteadas is None:
-            await update.message.reply_text("❌ Concurso não encontrado ou ainda não realizado.")
+        dezenas_sorteadas, data_sorteio = await obter_resultado_concurso(concurso)
+        if not dezenas_sorteadas:
+            await update.message.reply_text("Concurso não encontrado ou inválido.")
         else:
             with get_db() as conn:
                 jogos = conn.execute("SELECT id, dezenas FROM jogos WHERE user_id = ?", (uid,)).fetchall()
             if not jogos:
                 await update.message.reply_text("Você não tem jogos cadastrados.")
             else:
-                texto = f"🎯 *Resultado Concurso #{concurso_num} - {data_sorteio}*\n"
-                texto += f"Dezenas sorteadas: {', '.join(dezenas_sorteadas)}\n\n"
+                texto = f"🎯 Resultado #{concurso} - {data_sorteio}\nDezenas: {', '.join(dezenas_sorteadas)}\n\n"
                 for jid, dezenas_jogo in jogos:
                     dezenas_jogo_list = dezenas_jogo.split(",")
                     acertos = set(dezenas_jogo_list) & set(dezenas_sorteadas)
@@ -186,7 +203,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     uid = query.from_user.id
     data = query.data
-
     if data.startswith("excluir_"):
         idj = int(data.split("_")[1])
         with get_db() as conn:
@@ -196,32 +212,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def conferir_jogos(uid):
     concurso, dezenas_sorteadas, data_sorteio = await obter_ultimo_resultado()
     if not dezenas_sorteadas:
-        return "❌ Não foi possível obter o resultado da Mega-Sena."
+        return "❌ Erro ao obter o resultado da Mega-Sena."
     with get_db() as conn:
         jogos = conn.execute("SELECT id, dezenas FROM jogos WHERE user_id = ?", (uid,)).fetchall()
     if not jogos:
         return "Você não tem jogos cadastrados."
-    texto = f"🎯 *Resultado Mega-Sena Concurso #{concurso}* - {data_sorteio}\n"
-    texto += f"Dezenas sorteadas: {', '.join(dezenas_sorteadas)}\n\n"
+    texto = f"🎯 Resultado Mega-Sena #{concurso} - {data_sorteio}\nDezenas: {', '.join(dezenas_sorteadas)}\n\n"
     for jid, dezenas_jogo in jogos:
         dezenas_jogo_list = dezenas_jogo.split(",")
         acertos = set(dezenas_jogo_list) & set(dezenas_sorteadas)
         texto += f"Jogo #{jid}: {dezenas_jogo} - Acertos: *{len(acertos)}*\n"
     return texto
 
+# Main
 if __name__ == "__main__":
     nest_asyncio.apply()
+
     async def main():
-        print("🔄 Inicializando...")
+        print("🔄 Inicializando bot...")
         init_db()
         token = os.getenv("BOT_TOKEN")
         if not token:
-            print("❌ BOT_TOKEN não encontrado.")
+            print("❌ BOT_TOKEN não definido.")
             return
         app = ApplicationBuilder().token(token).build()
         app.add_handler(CommandHandler("start", start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
         app.add_handler(CallbackQueryHandler(button_handler))
-        print("✅ Bot Mega-Sena rodando...")
+        print("✅ Bot rodando...")
         await app.run_polling()
-    asyncio.get_event_loop().run_until_complete(main())
+
+    asyncio.run(main())
