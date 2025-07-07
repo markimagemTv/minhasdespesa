@@ -32,7 +32,7 @@ def init_db():
             )
         ''')
 
-# Teclado principal
+# Teclados principais
 def teclado_principal():
     buttons = [
         [KeyboardButton("➕ Adicionar Jogo")],
@@ -43,7 +43,7 @@ def teclado_principal():
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
-# Validação de dezenas
+# Validação das dezenas
 def validar_dezenas(texto):
     try:
         nums = [int(d) for d in texto.replace(" ", "").split(",")]
@@ -53,59 +53,76 @@ def validar_dezenas(texto):
     except:
         return None
 
-# API Caixa – Último resultado
+# ✅ API da Caixa (último resultado)
 async def obter_ultimo_resultado():
     url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena"
     headers = {
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "pt-BR,pt;q=0.9",
+        "Origin": "https://www.loterias.caixa.gov.br",
+        "Referer": "https://www.loterias.caixa.gov.br/"
     }
+
     try:
         async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json(content_type=None)
-                    dezenas = data.get("listaDezenasSorteadasOrdemSorteio")
-                    concurso = data.get("numero")
-                    data_sorteio = data.get("dataApuracao")
-                    if dezenas and concurso and data_sorteio:
-                        return concurso, dezenas, data_sorteio
-    except Exception as e:
-        print(f"❌ Erro na API último resultado: {e}")
-    return None, None, None
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    return None, None, None
+                data = await resp.json(content_type=None)
 
-# API Caixa – Por concurso
+                dezenas = data.get("listaDezenasSorteadasOrdemSorteio") or data.get("listaDezenas")
+                concurso = data.get("numero")
+                data_sorteio = data.get("dataApuracao")
+
+                if not dezenas or not concurso or not data_sorteio:
+                    return None, None, None
+
+                return concurso, dezenas, data_sorteio
+    except Exception as e:
+        print(f"❌ Erro: {e}")
+        return None, None, None
+
+# ✅ API Caixa por concurso
 async def obter_resultado_concurso(concurso_num):
     url = f"https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena/{concurso_num}"
     headers = {
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "pt-BR,pt;q=0.9",
+        "Origin": "https://www.loterias.caixa.gov.br",
+        "Referer": "https://www.loterias.caixa.gov.br/"
     }
+
     try:
         async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json(content_type=None)
-                    dezenas = data.get("listaDezenasSorteadasOrdemSorteio")
-                    data_sorteio = data.get("dataApuracao")
-                    if dezenas and data_sorteio:
-                        return dezenas, data_sorteio
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    return None, None
+                data = await resp.json(content_type=None)
+                dezenas = data.get("listaDezenasSorteadasOrdemSorteio") or data.get("listaDezenas")
+                data_sorteio = data.get("dataApuracao")
+                return dezenas, data_sorteio
     except Exception as e:
-        print(f"❌ Erro na API concurso {concurso_num}: {e}")
-    return None, None
+        print(f"❌ Erro: {e}")
+        return None, None
 
-# Bot: /start
+# Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🎉 Olá! Bem-vindo ao *Bot Mega-Sena*!\n\n"
-        "Use o menu abaixo para começar.",
+        "🎉 Olá! Bem-vindo ao *Bot Mega-Sena*!\n\nUse o menu abaixo para começar.",
         reply_markup=teclado_principal(),
         parse_mode="Markdown"
     )
     user_states.pop(update.message.from_user.id, None)
     temp_data.pop(update.message.from_user.id, None)
 
-# Bot: Mensagens
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.from_user.id
     texto = update.message.text.strip()
@@ -134,7 +151,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif texto == "📅 Resultado por Concurso":
         user_states[uid] = "aguardando_concurso"
-        await update.message.reply_text("Digite o número do concurso:")
+        await update.message.reply_text("Digite o número do concurso que deseja consultar:")
 
     elif texto == "❌ Excluir Jogo":
         with get_db() as conn:
@@ -148,7 +165,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif estado == "aguardando_dezenas":
         dezenas_validas = validar_dezenas(texto)
         if not dezenas_validas or len(dezenas_validas) != 6:
-            await update.message.reply_text("❌ Digite 6 números válidos entre 1 e 60, separados por vírgula.")
+            await update.message.reply_text("❌ Formato inválido. Digite 6 números entre 1 e 60 separados por vírgula.")
             return
         dezenas_str = ",".join(f"{d:02d}" for d in dezenas_validas)
         with get_db() as conn:
@@ -164,8 +181,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             concurso_num = int(texto)
         except:
-            await update.message.reply_text("❌ Número de concurso inválido.")
+            await update.message.reply_text("❌ Número de concurso inválido. Tente novamente.")
             return
+
         dezenas, data_sorteio = await obter_resultado_concurso(concurso_num)
         if dezenas is None:
             await update.message.reply_text("❌ Concurso não encontrado ou ainda não realizado.")
@@ -177,7 +195,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         user_states.pop(uid, None)
 
-# Bot: Botões inline
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -190,7 +207,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.execute("DELETE FROM jogos WHERE id = ? AND user_id = ?", (idj, uid))
         await query.edit_message_text("🗑️ Jogo removido com sucesso!")
 
-# Conferir jogos com último resultado
+# Conferir com último sorteio
 async def conferir_jogos(uid):
     concurso, dezenas_sorteadas, data_sorteio = await obter_ultimo_resultado()
     if not dezenas_sorteadas:
@@ -212,7 +229,7 @@ async def conferir_jogos(uid):
 
     return texto
 
-# Main
+# Main runner
 if __name__ == "__main__":
     nest_asyncio.apply()
 
