@@ -50,7 +50,9 @@ def validar_dezenas(texto):
         nums = [int(d) for d in texto.replace(" ", "").split(",")]
         if len(nums) != 6 or any(not (1 <= n <= 60) for n in nums):
             return None
-        return sorted(set(nums))
+        if len(set(nums)) != 6:  # Verifica repetições
+            return None
+        return sorted(nums)
     except:
         return None
 
@@ -193,8 +195,27 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 texto = f"🎯 Resultado #{concurso} - {data_sorteio}\nDezenas: {', '.join(dezenas_sorteadas)}\n\n"
                 for jid, dezenas_jogo in jogos:
                     dezenas_jogo_list = dezenas_jogo.split(",")
+                    
+                    dezenas_formatadas = []
+                    for dezena in dezenas_jogo_list:
+                        if dezena in dezenas_sorteadas:
+                            dezenas_formatadas.append(f"✅{dezena}")
+                        else:
+                            dezenas_formatadas.append(dezena)
+                    
                     acertos = set(dezenas_jogo_list) & set(dezenas_sorteadas)
-                    texto += f"Jogo #{jid}: {dezenas_jogo} - Acertos: *{len(acertos)}*\n"
+                    count_acertos = len(acertos)
+                    
+                    if count_acertos == 6:
+                        emoji = " 🏆"
+                    elif count_acertos == 5:
+                        emoji = " 🥳"
+                    elif count_acertos == 4:
+                        emoji = " 🎉"
+                    else:
+                        emoji = ""
+                    
+                    texto += f"Jogo #{jid}: {', '.join(dezenas_formatadas)} - Acertos: *{count_acertos}*{emoji}\n"
                 await update.message.reply_text(texto, parse_mode="Markdown")
         user_states.pop(uid, None)
 
@@ -218,10 +239,30 @@ async def conferir_jogos(uid):
     if not jogos:
         return "Você não tem jogos cadastrados."
     texto = f"🎯 Resultado Mega-Sena #{concurso} - {data_sorteio}\nDezenas: {', '.join(dezenas_sorteadas)}\n\n"
+    
     for jid, dezenas_jogo in jogos:
         dezenas_jogo_list = dezenas_jogo.split(",")
+        
+        dezenas_formatadas = []
+        for dezena in dezenas_jogo_list:
+            if dezena in dezenas_sorteadas:
+                dezenas_formatadas.append(f"✅{dezena}")
+            else:
+                dezenas_formatadas.append(dezena)
+        
         acertos = set(dezenas_jogo_list) & set(dezenas_sorteadas)
-        texto += f"Jogo #{jid}: {dezenas_jogo} - Acertos: *{len(acertos)}*\n"
+        count_acertos = len(acertos)
+        
+        if count_acertos == 6:
+            emoji = " 🏆"
+        elif count_acertos == 5:
+            emoji = " 🥳"
+        elif count_acertos == 4:
+            emoji = " 🎉"
+        else:
+            emoji = ""
+        
+        texto += f"Jogo #{jid}: {', '.join(dezenas_formatadas)} - Acertos: *{count_acertos}*{emoji}\n"
     return texto
 
 # Main
