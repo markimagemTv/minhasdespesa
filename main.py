@@ -32,7 +32,7 @@ def init_db():
             )
         ''')
 
-# Teclados principais
+# Teclado principal
 def teclado_principal():
     buttons = [
         [KeyboardButton("➕ Adicionar Jogo")],
@@ -43,53 +43,58 @@ def teclado_principal():
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
-# Validação das dezenas
+# Validação de dezenas
 def validar_dezenas(texto):
     try:
-        nums = [int(d.strip()) for d in texto.split(",")]
-        if len(nums) != 6:
+        nums = [int(d) for d in texto.replace(" ", "").split(",")]
+        if len(nums) != 6 or any(not (1 <= n <= 60) for n in nums):
             return None
-        if any(not (1 <= n <= 60) for n in nums):
-            return None
-        if len(set(nums)) != 6:
-            return None  # Tem duplicados
-        return sorted(nums)
+        return sorted(set(nums))
     except:
         return None
 
-# API da Caixa para último resultado
+# API Caixa – Último resultado
 async def obter_ultimo_resultado():
     url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena"
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0"
+    }
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(url) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
+                    data = await resp.json(content_type=None)
                     dezenas = data.get("listaDezenasSorteadasOrdemSorteio")
                     concurso = data.get("numero")
                     data_sorteio = data.get("dataApuracao")
-                    return concurso, dezenas, data_sorteio
+                    if dezenas and concurso and data_sorteio:
+                        return concurso, dezenas, data_sorteio
     except Exception as e:
-        print(f"Erro na API último resultado: {e}")
+        print(f"❌ Erro na API último resultado: {e}")
     return None, None, None
 
-# API Caixa para resultado por concurso
+# API Caixa – Por concurso
 async def obter_resultado_concurso(concurso_num):
     url = f"https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena/{concurso_num}"
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0"
+    }
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(url) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
+                    data = await resp.json(content_type=None)
                     dezenas = data.get("listaDezenasSorteadasOrdemSorteio")
                     data_sorteio = data.get("dataApuracao")
-                    return dezenas, data_sorteio
+                    if dezenas and data_sorteio:
+                        return dezenas, data_sorteio
     except Exception as e:
-        print(f"Erro na API resultado concurso {concurso_num}: {e}")
+        print(f"❌ Erro na API concurso {concurso_num}: {e}")
     return None, None
 
-# Handlers do bot
-
+# Bot: /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🎉 Olá! Bem-vindo ao *Bot Mega-Sena*!\n\n"
@@ -97,21 +102,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=teclado_principal(),
         parse_mode="Markdown"
     )
-    uid = update.message.from_user.id
-    user_states.pop(uid, None)
-    temp_data.pop(uid, None)
+    user_states.pop(update.message.from_user.id, None)
+    temp_data.pop(update.message.from_user.id, None)
 
+# Bot: Mensagens
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.from_user.id
     texto = update.message.text.strip()
     estado = user_states.get(uid)
 
-    # Comandos pelo menu principal
     if texto == "➕ Adicionar Jogo":
         user_states[uid] = "aguardando_dezenas"
-        await update.message.reply_text(
-            "Digite as 6 dezenas do seu jogo separadas por vírgula (ex: 04,15,23,33,40,56):"
-        )
+        await update.message.reply_text("Digite as 6 dezenas separadas por vírgula (ex: 04,15,23,33,40,56):")
         temp_data[uid] = {}
 
     elif texto == "📋 Listar Jogos":
@@ -132,7 +134,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif texto == "📅 Resultado por Concurso":
         user_states[uid] = "aguardando_concurso"
-        await update.message.reply_text("Digite o número do concurso que deseja consultar:")
+        await update.message.reply_text("Digite o número do concurso:")
 
     elif texto == "❌ Excluir Jogo":
         with get_db() as conn:
@@ -143,18 +145,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton(f"Jogo #{idj}: {dezenas}", callback_data=f"excluir_{idj}")] for idj, dezenas in jogos]
         await update.message.reply_text("Selecione o jogo para excluir:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    # Estados guiados
-
     elif estado == "aguardando_dezenas":
         dezenas_validas = validar_dezenas(texto)
-        if not dezenas_validas:
-            await update.message.reply_text("❌ Formato inválido. Digite 6 números únicos entre 1 e 60 separados por vírgula.")
+        if not dezenas_validas or len(dezenas_validas) != 6:
+            await update.message.reply_text("❌ Digite 6 números válidos entre 1 e 60, separados por vírgula.")
             return
         dezenas_str = ",".join(f"{d:02d}" for d in dezenas_validas)
         with get_db() as conn:
             conn.execute(
                 "INSERT INTO jogos (user_id, dezenas, data_cadastro) VALUES (?, ?, ?)",
-                (uid, dezenas_str, datetime.datetime.utcnow().isoformat())
+                (uid, dezenas_str, datetime.datetime.now().isoformat())
             )
         await update.message.reply_text(f"✅ Jogo cadastrado: {dezenas_str}", reply_markup=teclado_principal())
         user_states.pop(uid, None)
@@ -164,9 +164,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             concurso_num = int(texto)
         except:
-            await update.message.reply_text("❌ Número de concurso inválido. Tente novamente.")
+            await update.message.reply_text("❌ Número de concurso inválido.")
             return
-
         dezenas, data_sorteio = await obter_resultado_concurso(concurso_num)
         if dezenas is None:
             await update.message.reply_text("❌ Concurso não encontrado ou ainda não realizado.")
@@ -178,6 +177,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         user_states.pop(uid, None)
 
+# Bot: Botões inline
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -190,7 +190,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.execute("DELETE FROM jogos WHERE id = ? AND user_id = ?", (idj, uid))
         await query.edit_message_text("🗑️ Jogo removido com sucesso!")
 
-# Conferir jogos do usuário com o último resultado
+# Conferir jogos com último resultado
 async def conferir_jogos(uid):
     concurso, dezenas_sorteadas, data_sorteio = await obter_ultimo_resultado()
     if not dezenas_sorteadas:
@@ -205,16 +205,14 @@ async def conferir_jogos(uid):
     texto = f"🎯 *Resultado Mega-Sena Concurso #{concurso}* - {data_sorteio}\n"
     texto += f"Dezenas sorteadas: {', '.join(dezenas_sorteadas)}\n\n"
 
-    dezenas_sorteadas_set = set(dezenas_sorteadas)
-
     for jid, dezenas_jogo in jogos:
         dezenas_jogo_list = dezenas_jogo.split(",")
-        acertos = dezenas_sorteadas_set.intersection(dezenas_jogo_list)
-        texto += f"Jogo #{jid}: {dezenas_jogo} - Acertos: *{len(acertos)}* ({', '.join(sorted(acertos)) if acertos else 'Nenhum'})\n"
+        acertos = set(dezenas_jogo_list) & set(dezenas_sorteadas)
+        texto += f"Jogo #{jid}: {dezenas_jogo} - Acertos: *{len(acertos)}*\n"
 
     return texto
 
-# Main runner Railway-safe
+# Main
 if __name__ == "__main__":
     nest_asyncio.apply()
 
