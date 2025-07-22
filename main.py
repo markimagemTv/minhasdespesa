@@ -40,6 +40,7 @@ def teclado_principal():
         [KeyboardButton("✅ Conferir Jogos (Último Sorteio)")],
         [KeyboardButton("📅 Resultado por Concurso")],
         [KeyboardButton("📂 Conferir com Concurso Passado")],
+        [KeyboardButton("📈 Premiação do Último Sorteio")],
         [KeyboardButton("❌ Excluir Jogo")],
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
@@ -50,7 +51,7 @@ def validar_dezenas(texto):
         nums = [int(d) for d in texto.replace(" ", "").split(",")]
         if len(nums) != 6 or any(not (1 <= n <= 60) for n in nums):
             return None
-        if len(set(nums)) != 6:  # Verifica repetições
+        if len(set(nums)) != 6:
             return None
         return sorted(nums)
     except:
@@ -99,17 +100,88 @@ async def obter_resultado_concurso(concurso_num):
     except:
         return None, None
 
-# Handlers do bot
+# Função para exibir premiação do último sorteio
+async def exibir_premiacao_ultima():
+    url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Origin": "https://www.loterias.caixa.gov.br",
+        "Referer": "https://www.loterias.caixa.gov.br/"
+    }
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🎉 Olá! Bem-vindo ao *Bot Mega-Sena*!\n\nUse o menu abaixo para começar.",
-        reply_markup=teclado_principal(),
-        parse_mode="Markdown"
-    )
-    user_states.pop(update.message.from_user.id, None)
-    temp_data.pop(update.message.from_user.id, None)
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    return "❌ Erro ao buscar a premiação."
+                data = await resp.json(content_type=None)
+                
+                concurso = data.get("numero")
+                data_sorteio = data.get("dataApuracao")
+                dezenas = data.get("listaDezenasSorteadasOrdemSorteio") or data.get("listaDezenas")
+                acumulado = data.get("acumulado", False)
+                valor_acumulado = float(data.get("valorAcumuladoConcursoEspecial", 0.0))
+                premiacoes = data.get("listaRateioPremio", [])
 
+                texto = f"🎯 *Mega-Sena #{concurso} - {data_sorteio}*\n"
+                texto += f"Dezenas sorteadas: {', '.join(dezenas)}\n"
+                texto += f"Acumulou? {'✅ Sim' if acumulado else '❌ Não'}\n"
+                if valor_acumulado:
+                    texto += f"Valor acumulado p/ próximo concurso: *R$ {valor_acumulado:,.2f}*\n\n"
+
+                texto += "💰 *Premiação:*\n"
+                for faixa in premiacoes:
+                    texto += f"- {faixa['descricaoFaixa']}: {faixa['numeroDeGanhadores']} ganhadores - R$ {float(faixa['valorPremio']):,.2f}\n"
+
+                return texto
+    except Exception as e:
+        return f"❌ Erro ao processar a premiação: {str(e)}"
+
+# Função para premiação por concurso
+async def premiacao_por_concurso(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) != 1 or not context.args[0].isdigit():
+        await update.message.reply_text("❗ Use: /premiacao <número_do_concurso>")
+        return
+
+    concurso = context.args[0]
+    url = f"https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena/{concurso}"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Origin": "https://www.loterias.caixa.gov.br",
+        "Referer": "https://www.loterias.caixa.gov.br/"
+    }
+
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    await update.message.reply_text("❌ Concurso não encontrado.")
+                    return
+                data = await resp.json(content_type=None)
+                
+                dezenas = data.get("listaDezenasSorteadasOrdemSorteio") or data.get("listaDezenas")
+                data_sorteio = data.get("dataApuracao")
+                acumulado = data.get("acumulado", False)
+                valor_acumulado = float(data.get("valorAcumuladoConcursoEspecial", 0.0))
+                premiacoes = data.get("listaRateioPremio", [])
+
+                texto = f"🎯 *Mega-Sena #{concurso} - {data_sorteio}*\n"
+                texto += f"Dezenas sorteadas: {', '.join(dezenas)}\n"
+                texto += f"Acumulou? {'✅ Sim' if acumulado else '❌ Não'}\n"
+                if valor_acumulado:
+                    texto += f"Valor acumulado p/ próximo concurso: *R$ {valor_acumulado:,.2f}*\n\n"
+
+                texto += "💰 *Premiação:*\n"
+                for faixa in premiacoes:
+                    texto += f"- {faixa['descricaoFaixa']}: {faixa['numeroDeGanhadores']} ganhadores - R$ {float(faixa['valorPremio']):,.2f}\n"
+
+                await update.message.reply_text(texto, parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erro ao buscar dados: {str(e)}")
+
+# Handler principal de mensagens
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.from_user.id
     texto = update.message.text.strip()
@@ -133,6 +205,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif texto == "✅ Conferir Jogos (Último Sorteio)":
         texto_resultado = await conferir_jogos(uid)
+        await update.message.reply_text(texto_resultado, parse_mode="Markdown")
+
+    elif texto == "📈 Premiação do Último Sorteio":
+        texto_resultado = await exibir_premiacao_ultima()
         await update.message.reply_text(texto_resultado, parse_mode="Markdown")
 
     elif texto == "📅 Resultado por Concurso":
@@ -195,26 +271,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 texto = f"🎯 Resultado #{concurso} - {data_sorteio}\nDezenas: {', '.join(dezenas_sorteadas)}\n\n"
                 for jid, dezenas_jogo in jogos:
                     dezenas_jogo_list = dezenas_jogo.split(",")
-                    
-                    dezenas_formatadas = []
-                    for dezena in dezenas_jogo_list:
-                        if dezena in dezenas_sorteadas:
-                            dezenas_formatadas.append(f"✅{dezena}")
-                        else:
-                            dezenas_formatadas.append(dezena)
-                    
+                    dezenas_formatadas = [f"✅{d}" if d in dezenas_sorteadas else d for d in dezenas_jogo_list]
                     acertos = set(dezenas_jogo_list) & set(dezenas_sorteadas)
                     count_acertos = len(acertos)
-                    
-                    if count_acertos == 6:
-                        emoji = " 🏆"
-                    elif count_acertos == 5:
-                        emoji = " 🥳"
-                    elif count_acertos == 4:
-                        emoji = " 🎉"
-                    else:
-                        emoji = ""
-                    
+                    emoji = " 🏆" if count_acertos == 6 else " 🥳" if count_acertos == 5 else " 🎉" if count_acertos == 4 else ""
                     texto += f"Jogo #{jid}: {', '.join(dezenas_formatadas)} - Acertos: *{count_acertos}*{emoji}\n"
                 await update.message.reply_text(texto, parse_mode="Markdown")
         user_states.pop(uid, None)
@@ -239,29 +299,12 @@ async def conferir_jogos(uid):
     if not jogos:
         return "Você não tem jogos cadastrados."
     texto = f"🎯 Resultado Mega-Sena #{concurso} - {data_sorteio}\nDezenas: {', '.join(dezenas_sorteadas)}\n\n"
-    
     for jid, dezenas_jogo in jogos:
         dezenas_jogo_list = dezenas_jogo.split(",")
-        
-        dezenas_formatadas = []
-        for dezena in dezenas_jogo_list:
-            if dezena in dezenas_sorteadas:
-                dezenas_formatadas.append(f"✅{dezena}")
-            else:
-                dezenas_formatadas.append(dezena)
-        
+        dezenas_formatadas = [f"✅{d}" if d in dezenas_sorteadas else d for d in dezenas_jogo_list]
         acertos = set(dezenas_jogo_list) & set(dezenas_sorteadas)
         count_acertos = len(acertos)
-        
-        if count_acertos == 6:
-            emoji = " 🏆"
-        elif count_acertos == 5:
-            emoji = " 🥳"
-        elif count_acertos == 4:
-            emoji = " 🎉"
-        else:
-            emoji = ""
-        
+        emoji = " 🏆" if count_acertos == 6 else " 🥳" if count_acertos == 5 else " 🎉" if count_acertos == 4 else ""
         texto += f"Jogo #{jid}: {', '.join(dezenas_formatadas)} - Acertos: *{count_acertos}*{emoji}\n"
     return texto
 
@@ -278,6 +321,7 @@ if __name__ == "__main__":
             return
         app = ApplicationBuilder().token(token).build()
         app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("premiacao", premiacao_por_concurso))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
         app.add_handler(CallbackQueryHandler(button_handler))
         print("✅ Bot rodando...")
