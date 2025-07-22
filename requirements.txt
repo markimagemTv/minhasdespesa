@@ -1,4 +1,3 @@
-requests
 python-telegram-bot==20.3
-Flask
+aiohttp
 nest_asyncio
