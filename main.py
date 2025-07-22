@@ -1,4 +1,3 @@
-
 import os
 import sqlite3
 import datetime
@@ -14,9 +13,11 @@ from telegram.ext import (
 import nest_asyncio
 import asyncio
 
+# Estados e dados temporários por usuário
 user_states = {}
 temp_data = {}
 
+# Banco de dados
 def get_db():
     return sqlite3.connect("megasena.db")
 
@@ -31,6 +32,7 @@ def init_db():
             )
         ''')
 
+# Teclados principais
 def teclado_principal():
     buttons = [
         [KeyboardButton("➕ Adicionar Jogo")],
@@ -42,6 +44,7 @@ def teclado_principal():
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
+# Validação das dezenas
 def validar_dezenas(texto):
     try:
         nums = [int(d) for d in texto.replace(" ", "").split(",")]
@@ -51,6 +54,7 @@ def validar_dezenas(texto):
     except:
         return None
 
+# API da Caixa para último resultado
 async def obter_ultimo_resultado():
     url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena"
     headers = {
@@ -72,6 +76,7 @@ async def obter_ultimo_resultado():
     except:
         return None, None, None
 
+# Resultado por concurso
 async def obter_resultado_concurso(concurso_num):
     url = f"https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena/{concurso_num}"
     headers = {
@@ -92,17 +97,17 @@ async def obter_resultado_concurso(concurso_num):
     except:
         return None, None
 
+# Handler de /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🎉 Olá! Bem-vindo ao *Bot Mega-Sena*!
-
-Use o menu abaixo para começar.",
+        "🎉 Olá! Bem-vindo ao *Bot Mega-Sena!*\n\nUse o menu abaixo para começar.",
         reply_markup=teclado_principal(),
         parse_mode="Markdown"
     )
     user_states.pop(update.message.from_user.id, None)
     temp_data.pop(update.message.from_user.id, None)
 
+# Handler de mensagens
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.from_user.id
     texto = update.message.text.strip()
@@ -118,13 +123,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not jogos:
             await update.message.reply_text("Você não tem jogos cadastrados.")
             return
-        msg = "📋 *Seus Jogos:*
-
-"
+        msg = "📋 *Seus Jogos:*\n\n"
         for idj, dezenas, data_cad in jogos:
             data_fmt = datetime.datetime.fromisoformat(data_cad).strftime("%d/%m/%Y %H:%M")
-            msg += f"#{idj}: {dezenas} (cadastrado em {data_fmt})
-"
+            msg += f"#{idj}: {dezenas} (cadastrado em {data_fmt})\n"
         await update.message.reply_text(msg, parse_mode="Markdown")
 
     elif texto == "✅ Conferir Jogos (Último Sorteio)":
@@ -188,10 +190,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not jogos:
                 await update.message.reply_text("Você não tem jogos cadastrados.")
             else:
-                texto = f"🎯 Resultado #{concurso} - {data_sorteio}
-Dezenas: {', '.join(dezenas_sorteadas)}
-
-"
+                texto = f"🎯 Resultado #{concurso} - {data_sorteio}\nDezenas: {', '.join(dezenas_sorteadas)}\n\n"
                 for jid, dezenas_jogo in jogos:
                     dezenas_jogo_list = dezenas_jogo.split(",")
                     acertos = set(dezenas_jogo_list) & set(dezenas_sorteadas)
@@ -209,11 +208,11 @@ Dezenas: {', '.join(dezenas_sorteadas)}
                     else:
                         emoji_resultado = "✖️"
 
-                    texto += f"Jogo #{jid}: {', '.join(dezenas_formatadas)} - Acertos: *{qtd_acertos}* {emoji_resultado}
-"
+                    texto += f"Jogo #{jid}: {', '.join(dezenas_formatadas)} - Acertos: *{qtd_acertos}* {emoji_resultado}\n"
                 await update.message.reply_text(texto, parse_mode="Markdown")
         user_states.pop(uid, None)
 
+# Handler para botões inline
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -225,6 +224,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.execute("DELETE FROM jogos WHERE id = ? AND user_id = ?", (idj, uid))
         await query.edit_message_text("🗑️ Jogo removido com sucesso!")
 
+# Conferência de jogos com resultado mais recente
 async def conferir_jogos(uid):
     concurso, dezenas_sorteadas, data_sorteio = await obter_ultimo_resultado()
     if not dezenas_sorteadas:
@@ -233,10 +233,7 @@ async def conferir_jogos(uid):
         jogos = conn.execute("SELECT id, dezenas FROM jogos WHERE user_id = ?", (uid,)).fetchall()
     if not jogos:
         return "Você não tem jogos cadastrados."
-    texto = f"🎯 Resultado Mega-Sena #{concurso} - {data_sorteio}
-Dezenas: {', '.join(dezenas_sorteadas)}
-
-"
+    texto = f"🎯 Resultado Mega-Sena #{concurso} - {data_sorteio}\nDezenas: {', '.join(dezenas_sorteadas)}\n\n"
     for jid, dezenas_jogo in jogos:
         dezenas_jogo_list = dezenas_jogo.split(",")
         acertos = set(dezenas_jogo_list) & set(dezenas_sorteadas)
@@ -254,10 +251,10 @@ Dezenas: {', '.join(dezenas_sorteadas)}
         else:
             emoji_resultado = "✖️"
 
-        texto += f"Jogo #{jid}: {', '.join(dezenas_formatadas)} - Acertos: *{qtd_acertos}* {emoji_resultado}
-"
+        texto += f"Jogo #{jid}: {', '.join(dezenas_formatadas)} - Acertos: *{qtd_acertos}* {emoji_resultado}\n"
     return texto
 
+# Execução principal
 if __name__ == "__main__":
     nest_asyncio.apply()
 
