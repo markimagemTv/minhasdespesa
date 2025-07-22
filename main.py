@@ -97,12 +97,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard_inline = [
         [InlineKeyboardButton("➕ Adicionar jogo", callback_data='add'), InlineKeyboardButton("❌ Remover jogo", callback_data='remove')],
         [InlineKeyboardButton("📋 Listar jogos", callback_data='list'), InlineKeyboardButton("🎯 Conferir rápido", callback_data='check')],
-        [InlineKeyboardButton("📅 Conferir antigos", callback_data='check_past'), InlineKeyboardButton("🖊 Manual", callback_data='manual_result')],
-        [InlineKeyboardButton("💰 Próximo prêmio", callback_data='next_prize')]
+        [InlineKeyboardButton("📅 Conferir antigos", callback_data='check_past'), InlineKeyboardButton("🖊 Manual", callback_data='manual_result')]
     ] if user_id == ADMIN_ID else [
         [InlineKeyboardButton("📋 Listar jogos", callback_data='list'), InlineKeyboardButton("🎯 Conferir", callback_data='check')],
-        [InlineKeyboardButton("📅 Conferir antigos", callback_data='check_past')],
-        [InlineKeyboardButton("💰 Próximo prêmio", callback_data='next_prize')]
+        [InlineKeyboardButton("📅 Conferir antigos", callback_data='check_past')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard_inline)
     keyboard_reply = ReplyKeyboardMarkup([[KeyboardButton("/start")], [KeyboardButton("/cancel")]], resize_keyboard=True)
@@ -129,8 +127,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not jogos:
             await query.edit_message_text("📭 Nenhum jogo salvo.")
             return
-        texto = "\n".join([f"{i+1}: {' '.join(f'{d:02}' for d in jogo[1])}" for i, jogo in enumerate(jogos)])
-        await query.edit_message_text(f"📋 Jogos:\n{texto}")
+        texto = "
+".join([f"{i+1}: {' '.join(f'{d:02}' for d in jogo[1])}" for i, jogo in enumerate(jogos)])
+        await query.edit_message_text(f"📋 Jogos:
+{texto}")
     elif query.data == 'check':
         try:
             dados = obter_resultado_megasena()
@@ -142,31 +142,15 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not jogos:
             await query.edit_message_text("📭 Nenhum jogo salvo.")
             return
-        texto = f"🎱 Concurso {concurso} - {data}\nResultado: {' '.join(f'{d:02}' for d in resultado)}\n\n"
+        texto = f"🎱 Concurso {concurso} - {data}
+Resultado: {' '.join(f'{d:02}' for d in resultado)}
+
+"
         for i, jogo in enumerate(jogos):
             acertos = set(jogo[1]) & set(resultado)
-            texto += f"Jogo {i+1}: {' '.join(f'✅{d:02}' if d in acertos else f'{d:02}' for d in jogo[1])} → {len(acertos)} acertos\n"
+            texto += f"Jogo {i+1}: {' '.join(f'✅{d:02}' if d in acertos else f'{d:02}' for d in jogo[1])} → {len(acertos)} acertos
+"
         await query.edit_message_text(texto)
-    elif query.data == 'next_prize':
-        try:
-            response = requests.get('https://loteriascaixa-api.herokuapp.com/api/megasena/latest', timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            estimativa = data.get('valor_estimado_proximo_concurso')
-            acumulado = data.get('acumulado', False)
-
-            if estimativa:
-                valor = f"R$ {float(estimativa):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-                texto = f"💰 *Próximo prêmio estimado*: {valor}"
-                if acumulado:
-                    texto += "\n🎯 *Acumulado!*"
-            else:
-                texto = "❌ Não foi possível obter a estimativa do próximo prêmio."
-
-            await query.edit_message_text(texto, parse_mode="Markdown")
-        except Exception as e:
-            logger.error(f"Erro ao buscar próximo prêmio: {e}")
-            await query.edit_message_text("⚠️ Erro ao buscar o próximo prêmio.")
 
 async def mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text.strip()
