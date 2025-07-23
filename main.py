@@ -177,7 +177,7 @@ async def pagar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mp_client = mercadopago.SDK(mp_token)
 
     payment_data = {
-        "transaction_amount": 10.00,
+        "transaction_amount": 5.00,
         "description": "Acesso ao Bot Mega-Sena",
         "payment_method_id": "pix",
         "payer": {
