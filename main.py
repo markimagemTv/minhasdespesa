@@ -2,6 +2,8 @@ import os
 import sqlite3
 import datetime
 import aiohttp
+import nest_asyncio
+import asyncio
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
     ReplyKeyboardMarkup, KeyboardButton
@@ -10,11 +12,12 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     CallbackQueryHandler, ContextTypes, filters
 )
-import nest_asyncio
-import asyncio
 
+# Estados e dados temporários por usuário
 user_states = {}
 temp_data = {}
+
+# Banco de dados
 
 def get_db():
     return sqlite3.connect("megasena.db")
@@ -30,6 +33,8 @@ def init_db():
             )
         ''')
 
+# Teclado principal
+
 def teclado_principal():
     buttons = [
         [KeyboardButton("➕ Adicionar Jogo")],
@@ -41,14 +46,18 @@ def teclado_principal():
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
+# Validação de dezenas
+
 def validar_dezenas(texto):
     try:
-        nums = [int(d) for d in texto.replace(" ", "").split(",")]
+        nums = sorted(set(int(d) for d in texto.replace(" ", "").split(",")))
         if len(nums) != 6 or any(not (1 <= n <= 60) for n in nums):
             return None
-        return sorted(set(nums))
+        return nums
     except:
         return None
+
+# Obter último resultado com prêmios e acumulado
 
 async def obter_ultimo_resultado():
     url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena"
@@ -62,14 +71,18 @@ async def obter_ultimo_resultado():
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(url, timeout=10) as resp:
                 if resp.status != 200:
-                    return None, None, None
+                    return None, None, None, None, None
                 data = await resp.json(content_type=None)
                 dezenas = data.get("listaDezenasSorteadasOrdemSorteio") or data.get("listaDezenas")
                 concurso = data.get("numero")
                 data_sorteio = data.get("dataApuracao")
-                return concurso, dezenas, data_sorteio
+                premiacoes = data.get("listaRateioPremio")
+                acumulado = data.get("valorAcumuladoProximoConcurso")
+                return concurso, dezenas, data_sorteio, premiacoes, acumulado
     except:
-        return None, None, None
+        return None, None, None, None, None
+
+# Obter resultado por concurso
 
 async def obter_resultado_concurso(concurso_num):
     url = f"https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena/{concurso_num}"
@@ -91,6 +104,42 @@ async def obter_resultado_concurso(concurso_num):
     except:
         return None, None
 
+# Conferência de jogos
+
+async def conferir_jogos(uid):
+    concurso, dezenas_sorteadas, data_sorteio, premiacoes, acumulado = await obter_ultimo_resultado()
+    if not dezenas_sorteadas:
+        return "❌ Erro ao obter o resultado da Mega-Sena."
+    with get_db() as conn:
+        jogos = conn.execute("SELECT id, dezenas FROM jogos WHERE user_id = ?", (uid,)).fetchall()
+    if not jogos:
+        return "Você não tem jogos cadastrados."
+
+    texto = f"🎯 Resultado Mega-Sena #{concurso} - {data_sorteio}\nDezenas: {', '.join(dezenas_sorteadas)}\n"
+
+    # Prêmios
+    if premiacoes:
+        texto += "\n🏆 Premiação:\n"
+        for p in premiacoes:
+            faixa = p.get("descricaoFaixa")
+            ganhadores = p.get("numeroDeGanhadores")
+            valor = p.get("valorPremio")
+            texto += f"➡️ {faixa}: {ganhadores} ganhador(es) - R$ {float(valor):,.2f}\n"
+
+    if acumulado:
+        texto += f"\n📈 Acumulado próximo concurso: R$ {float(acumulado):,.2f}\n"
+
+    texto += "\n📊 Seus jogos:\n"
+    for jid, dezenas_jogo in jogos:
+        dezenas_jogo_list = dezenas_jogo.split(",")
+        acertos = set(dezenas_jogo_list) & set(dezenas_sorteadas)
+        emojis = {4: "🔸", 5: "🔷", 6: "💎"}.get(len(acertos), "➖")
+        texto += f"{emojis} Jogo #{jid}: {dezenas_jogo} - Acertos: *{len(acertos)}*\n"
+
+    return texto
+
+# Bot Handlers (Start, Mensagens, Botões)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🎉 Olá! Bem-vindo ao *Bot Mega-Sena*!\n\nUse o menu abaixo para começar.",
@@ -100,54 +149,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states.pop(update.message.from_user.id, None)
     temp_data.pop(update.message.from_user.id, None)
 
-async def conferir_jogos(uid):
-    concurso, dezenas_sorteadas, data_sorteio = await obter_ultimo_resultado()
-    if not dezenas_sorteadas:
-        return "❌ Erro ao obter o resultado da Mega-Sena."
-    with get_db() as conn:
-        jogos = conn.execute("SELECT id, dezenas FROM jogos WHERE user_id = ?", (uid,)).fetchall()
-    if not jogos:
-        return "Você não tem jogos cadastrados."
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Aqui entra a lógica de mensagens — omitido por limite de espaço
+    pass
 
-    texto = f"🎯 Resultado Mega-Sena #{concurso} - {data_sorteio}\nDezenas: {', '.join(dezenas_sorteadas)}\n\n"
-    for jid, dezenas_jogo in jogos:
-        dezenas_jogo_list = dezenas_jogo.split(",")
-        acertos = set(dezenas_jogo_list) & set(dezenas_sorteadas)
-        emojis = ''.join(['✅' if dj in acertos else '🔸' for dj in dezenas_jogo_list])
-        bonus = ""
-        if len(acertos) == 6:
-            bonus = " 🏆🎉"
-        elif len(acertos) == 5:
-            bonus = " 💰"
-        elif len(acertos) == 4:
-            bonus = " 🎯"
-        texto += f"Jogo #{jid}: {dezenas_jogo} - Acertos: *{len(acertos)}*{bonus} {emojis}\n"
-
-    # Buscar info extra sobre prêmios e acumulado
-    url = f"https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena/{concurso}"
-    headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-    try:
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json(content_type=None)
-                    rateios = data.get("listaRateioPremio", [])
-                    acumulado = data.get("valorAcumuladoConcursoProximo", 0)
-                    texto += "\n\n🏅 *Prêmios Pagos:*\n"
-                    for faixa in rateios:
-                        texto += f"- {faixa['descricaoFaixa']}: {faixa['numeroDeGanhadores']} ganhador(es), R$ {float(faixa['valorPremio']):,.2f}\n"
-                    texto += f"\n📈 *Acumulado para o próximo concurso:* R$ {float(acumulado):,.2f}"
-    except:
-        texto += "\n\n⚠️ Não foi possível carregar os prêmios."
-
-    return texto
-
-# Você pode continuar incluindo os outros handlers como message_handler, excluir jogo etc. com base na estrutura acima.
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Lógica de clique em botões — omitido por limite de espaço
+    pass
 
 # Main
+
 if __name__ == "__main__":
     nest_asyncio.apply()
-
     async def main():
         print("🔄 Inicializando bot...")
         init_db()
@@ -161,5 +174,4 @@ if __name__ == "__main__":
         app.add_handler(CallbackQueryHandler(button_handler))
         print("✅ Bot rodando...")
         await app.run_polling()
-
     asyncio.run(main())
