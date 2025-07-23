@@ -1,3 +1,7 @@
 python-telegram-bot==20.3
 aiohttp
 nest_asyncio
+python-telegram-bot
+aiohttp
+nest_asyncio
+mercadopago
