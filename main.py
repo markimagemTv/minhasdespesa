@@ -117,7 +117,6 @@ async def conferir_jogos(uid):
 
     texto = f"🎯 Resultado Mega-Sena #{concurso} - {data_sorteio}\nDezenas: {', '.join(dezenas_sorteadas)}\n"
 
-    # Prêmios
     if premiacoes:
         texto += "\n🏆 Premiação:\n"
         for p in premiacoes:
@@ -134,11 +133,12 @@ async def conferir_jogos(uid):
         dezenas_jogo_list = dezenas_jogo.split(",")
         acertos = set(dezenas_jogo_list) & set(dezenas_sorteadas)
         emojis = {4: "🔸", 5: "🔷", 6: "💎"}.get(len(acertos), "➖")
-        texto += f"{emojis} Jogo #{jid}: {dezenas_jogo} - Acertos: *{len(acertos)}*\n"
+        dezenas_formatadas = [f"{dez}🎯" if dez in acertos else dez for dez in dezenas_jogo_list]
+        texto += f"{emojis} Jogo #{jid}: {', '.join(dezenas_formatadas)} - Acertos: *{len(acertos)}*\n"
 
     return texto
 
-# Bot Handlers (Start, Mensagens, Botões)
+# Bot Handlers
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -153,7 +153,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.from_user.id
     text = update.message.text.strip()
 
-    # Estados pendentes
     if user_states.get(uid) == "aguardando_dezenas":
         dezenas = validar_dezenas(text)
         if not dezenas:
@@ -224,10 +223,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 resposta = f"📅 Concurso #{text} ({data_sorteio})\n🔢 Dezenas sorteadas: {', '.join(dezenas)}\n\n"
                 for jid, d in jogos:
-                    dezenas_jogo = d.split(",")
-                    acertos = set(dezenas_jogo) & set(dezenas)
+                    dezenas_jogo_list = d.split(",")
+                    acertos = set(dezenas_jogo_list) & set(dezenas)
                     emojis = {4: "🔸", 5: "🔷", 6: "💎"}.get(len(acertos), "➖")
-                    resposta += f"{emojis} Jogo #{jid}: {d} - Acertos: *{len(acertos)}*\n"
+                    dezenas_formatadas = [f"{dez}🎯" if dez in acertos else dez for dez in dezenas_jogo_list]
+                    resposta += f"{emojis} Jogo #{jid}: {', '.join(dezenas_formatadas)} - Acertos: *{len(acertos)}*\n"
                 await update.message.reply_text(resposta, parse_mode="Markdown")
         user_states.pop(uid, None)
 
