@@ -150,12 +150,98 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_data.pop(update.message.from_user.id, None)
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Aqui entra a lógica de mensagens — omitido por limite de espaço
-    pass
+    uid = update.message.from_user.id
+    text = update.message.text.strip()
+
+    # Estados pendentes
+    if user_states.get(uid) == "aguardando_dezenas":
+        dezenas = validar_dezenas(text)
+        if not dezenas:
+            await update.message.reply_text("❌ Entrada inválida. Envie 6 números de 1 a 60 separados por vírgula.")
+            return
+        with get_db() as conn:
+            conn.execute("INSERT INTO jogos (user_id, dezenas, data_cadastro) VALUES (?, ?, ?)",
+                         (uid, ",".join(map(str, dezenas)), datetime.datetime.now().isoformat()))
+        await update.message.reply_text("✅ Jogo cadastrado com sucesso!", reply_markup=teclado_principal())
+        user_states.pop(uid, None)
+        return
+
+    if text == "➕ Adicionar Jogo":
+        user_states[uid] = "aguardando_dezenas"
+        await update.message.reply_text("✍️ Envie suas 6 dezenas separadas por vírgula (ex: 5,12,23,34,45,56)")
+
+    elif text == "📋 Listar Jogos":
+        with get_db() as conn:
+            jogos = conn.execute("SELECT id, dezenas FROM jogos WHERE user_id = ?", (uid,)).fetchall()
+        if not jogos:
+            await update.message.reply_text("📭 Você ainda não cadastrou nenhum jogo.")
+        else:
+            resposta = "📋 Seus jogos cadastrados:\n"
+            for jid, d in jogos:
+                resposta += f"🔹 Jogo #{jid}: {d}\n"
+            await update.message.reply_text(resposta)
+
+    elif text == "✅ Conferir Jogos (Último Sorteio)":
+        resposta = await conferir_jogos(uid)
+        await update.message.reply_text(resposta, parse_mode="Markdown")
+
+    elif text == "❌ Excluir Jogo":
+        with get_db() as conn:
+            jogos = conn.execute("SELECT id, dezenas FROM jogos WHERE user_id = ?", (uid,)).fetchall()
+        if not jogos:
+            await update.message.reply_text("Você não tem jogos para excluir.")
+            return
+        botoes = [[InlineKeyboardButton(f"Jogo #{jid}: {d}", callback_data=f"del:{jid}")]
+                  for jid, d in jogos]
+        markup = InlineKeyboardMarkup(botoes)
+        await update.message.reply_text("🗑️ Escolha o jogo que deseja excluir:", reply_markup=markup)
+
+    elif text == "📅 Resultado por Concurso":
+        user_states[uid] = "aguardando_concurso_resultado"
+        await update.message.reply_text("📩 Envie o número do concurso que deseja consultar.")
+
+    elif text == "📂 Conferir com Concurso Passado":
+        user_states[uid] = "aguardando_concurso_conferencia"
+        await update.message.reply_text("📩 Envie o número do concurso com o qual deseja conferir seus jogos.")
+
+    elif user_states.get(uid) == "aguardando_concurso_resultado" and text.isdigit():
+        dezenas, data_sorteio = await obter_resultado_concurso(text)
+        if not dezenas:
+            await update.message.reply_text("❌ Concurso não encontrado.")
+        else:
+            await update.message.reply_text(f"📅 Concurso #{text} ({data_sorteio})\n🔢 Dezenas: {', '.join(dezenas)}")
+        user_states.pop(uid, None)
+
+    elif user_states.get(uid) == "aguardando_concurso_conferencia" and text.isdigit():
+        dezenas, data_sorteio = await obter_resultado_concurso(text)
+        if not dezenas:
+            await update.message.reply_text("❌ Concurso não encontrado.")
+        else:
+            with get_db() as conn:
+                jogos = conn.execute("SELECT id, dezenas FROM jogos WHERE user_id = ?", (uid,)).fetchall()
+            if not jogos:
+                await update.message.reply_text("Você não tem jogos cadastrados.")
+            else:
+                resposta = f"📅 Concurso #{text} ({data_sorteio})\n🔢 Dezenas sorteadas: {', '.join(dezenas)}\n\n"
+                for jid, d in jogos:
+                    dezenas_jogo = d.split(",")
+                    acertos = set(dezenas_jogo) & set(dezenas)
+                    emojis = {4: "🔸", 5: "🔷", 6: "💎"}.get(len(acertos), "➖")
+                    resposta += f"{emojis} Jogo #{jid}: {d} - Acertos: *{len(acertos)}*\n"
+                await update.message.reply_text(resposta, parse_mode="Markdown")
+        user_states.pop(uid, None)
+
+    else:
+        await update.message.reply_text("❓ Comando não reconhecido. Use o menu abaixo.", reply_markup=teclado_principal())
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Lógica de clique em botões — omitido por limite de espaço
-    pass
+    query = update.callback_query
+    await query.answer()
+    if query.data.startswith("del:"):
+        jid = int(query.data.split(":")[1])
+        with get_db() as conn:
+            conn.execute("DELETE FROM jogos WHERE id = ?", (jid,))
+        await query.edit_message_text("✅ Jogo excluído com sucesso.")
 
 # Main
 
