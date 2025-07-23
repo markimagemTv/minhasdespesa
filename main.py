@@ -17,11 +17,7 @@ from telegram.ext import (
 # Estados e dados temporários por usuário
 user_states = {}
 temp_data = {}
-
-# Usuários que já pagaram (em memória, pode ser salvo em banco para persistência)
 usuarios_pagantes = set()
-
-# Banco de dados
 
 def get_db():
     return sqlite3.connect("megasena.db")
@@ -37,8 +33,6 @@ def init_db():
             )
         ''')
 
-# Teclado principal
-
 def teclado_principal():
     buttons = [
         [KeyboardButton("➕ Adicionar Jogo")],
@@ -50,7 +44,29 @@ def teclado_principal():
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
-# Validação de dezenas
+def teclado_dezenas(selecionadas=None):
+    if selecionadas is None:
+        selecionadas = []
+
+    keyboard = []
+    linha = []
+    for i in range(1, 61):
+        numero_str = str(i).zfill(2)
+        marcado = "✅" if numero_str in selecionadas else ""
+        botao = InlineKeyboardButton(
+            f"{marcado}{numero_str}",
+            callback_data=f"dezena:{numero_str}"
+        )
+        linha.append(botao)
+        if len(linha) == 6:
+            keyboard.append(linha)
+            linha = []
+
+    keyboard.append([
+        InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_dezenas"),
+        InlineKeyboardButton("🔁 Limpar", callback_data="limpar_dezenas")
+    ])
+    return InlineKeyboardMarkup(keyboard)
 
 def validar_dezenas(texto):
     try:
@@ -60,8 +76,6 @@ def validar_dezenas(texto):
         return nums
     except:
         return None
-
-# Obter último resultado com prêmios e acumulado
 
 async def obter_ultimo_resultado():
     url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena"
@@ -86,8 +100,6 @@ async def obter_ultimo_resultado():
     except:
         return None, None, None, None, None
 
-# Obter resultado por concurso
-
 async def obter_resultado_concurso(concurso_num):
     url = f"https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena/{concurso_num}"
     headers = {
@@ -107,8 +119,6 @@ async def obter_resultado_concurso(concurso_num):
                 return dezenas, data_sorteio
     except:
         return None, None
-
-# Conferência de jogos
 
 async def conferir_jogos(uid):
     concurso, dezenas_sorteadas, data_sorteio, premiacoes, acumulado = await obter_ultimo_resultado()
@@ -142,8 +152,6 @@ async def conferir_jogos(uid):
 
     return texto
 
-# --- NOVO: Pagamento Mercado Pago ---
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.from_user.id
     if uid in usuarios_pagantes:
@@ -175,7 +183,6 @@ async def pagar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     mp_client = mercadopago.SDK(mp_token)
-
     payment_data = {
         "transaction_amount": 5.00,
         "description": "Acesso ao Bot Mega-Sena",
@@ -189,7 +196,6 @@ async def pagar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         payment_response = mp_client.payment().create(payment_data)
         payment = payment_response["response"]
         qr_code = payment.get("point_of_interaction", {}).get("transaction_data", {}).get("qr_code")
-        qr_code_base64 = payment.get("point_of_interaction", {}).get("transaction_data", {}).get("qr_code_base64")
 
         if not qr_code:
             await query.edit_message_text("❌ Não foi possível gerar o QR Code do pagamento.")
@@ -204,20 +210,14 @@ async def pagar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⏳ Aguardando confirmação do pagamento...
 """
         await query.edit_message_text(texto_pix, parse_mode="Markdown")
-
-        # Aqui você pode implementar a verificação real via webhook ou polling.
-        # Para exemplo, aguarda 60 segundos e libera acesso.
-
-        await asyncio.sleep(60)
-
-        # Simular confirmação
+        await asyncio.sleep(60)  # Simula verificação
         usuarios_pagantes.add(uid)
+
         await context.bot.send_message(
             chat_id=uid,
             text="✅ Pagamento confirmado! Agora você tem acesso completo ao bot.",
             reply_markup=teclado_principal()
         )
-
     except Exception as e:
         await context.bot.send_message(chat_id=uid, text=f"❌ Erro ao gerar pagamento: {e}")
 
@@ -225,30 +225,17 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.from_user.id
     text = update.message.text.strip()
 
-    # Controle de acesso
     if uid not in usuarios_pagantes:
         await update.message.reply_text(
             "🚫 Você precisa realizar o pagamento para acessar o bot. Use /start para iniciar o pagamento."
         )
         return
 
-    # Seu código atual de message_handler segue abaixo:
-
-    if user_states.get(uid) == "aguardando_dezenas":
-        dezenas = validar_dezenas(text)
-        if not dezenas:
-            await update.message.reply_text("❌ Entrada inválida. Envie 6 números de 1 a 60 separados por vírgula.")
-            return
-        with get_db() as conn:
-            conn.execute("INSERT INTO jogos (user_id, dezenas, data_cadastro) VALUES (?, ?, ?)",
-                         (uid, ",".join(map(str, dezenas)), datetime.datetime.now().isoformat()))
-        await update.message.reply_text("✅ Jogo cadastrado com sucesso!", reply_markup=teclado_principal())
-        user_states.pop(uid, None)
-        return
-
     if text == "➕ Adicionar Jogo":
-        user_states[uid] = "aguardando_dezenas"
-        await update.message.reply_text("✍️ Envie suas 6 dezenas separadas por vírgula (ex: 5,12,23,34,45,56)")
+        user_states[uid] = "selecionando_dezenas"
+        temp_data[uid] = []
+        await update.message.reply_text("👉 Selecione 6 dezenas:", reply_markup=teclado_dezenas())
+        return
 
     elif text == "📋 Listar Jogos":
         with get_db() as conn:
@@ -289,9 +276,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not dezenas:
             await update.message.reply_text("❌ Concurso não encontrado.")
         else:
-            await update.message.reply_text(
-                f"📅 Resultado Mega-Sena #{text} - {data_sorteio}\nDezenas: {', '.join(dezenas)}"
-            )
+            await update.message.reply_text(f"📅 Resultado Mega-Sena #{text} - {data_sorteio}\nDezenas: {', '.join(dezenas)}")
         user_states.pop(uid, None)
 
     elif user_states.get(uid) == "aguardando_concurso_conferencia" and text.isdigit():
@@ -309,8 +294,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_states.pop(uid, None)
             return
 
-        texto = f"🎯 Resultado Mega-Sena #{concurso_num} - {data_sorteio}\nDezenas: {', '.join(dezenas_sorteadas)}\n"
-        texto += "\n📊 Seus jogos:\n"
+        texto = f"🎯 Resultado Mega-Sena #{concurso_num} - {data_sorteio}\nDezenas: {', '.join(dezenas_sorteadas)}\n📊 Seus jogos:\n"
         for jid, dezenas_jogo in jogos:
             dezenas_jogo_list = dezenas_jogo.split(",")
             acertos = set(dezenas_jogo_list) & set(dezenas_sorteadas)
@@ -334,13 +318,44 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await pagar_callback(update, context)
         return
 
+    if user_states.get(uid) == "selecionando_dezenas":
+        if data.startswith("dezena:"):
+            dez = data.split(":")[1]
+            selecionadas = temp_data.get(uid, [])
+            if dez in selecionadas:
+                selecionadas.remove(dez)
+            elif len(selecionadas) < 6:
+                selecionadas.append(dez)
+            temp_data[uid] = selecionadas
+            await query.edit_message_reply_markup(reply_markup=teclado_dezenas(selecionadas))
+            return
+
+        elif data == "limpar_dezenas":
+            temp_data[uid] = []
+            await query.edit_message_reply_markup(reply_markup=teclado_dezenas())
+            return
+
+        elif data == "confirmar_dezenas":
+            selecionadas = temp_data.get(uid, [])
+            if len(selecionadas) != 6:
+                await query.answer("Selecione exatamente 6 dezenas.", show_alert=True)
+                return
+            with get_db() as conn:
+                conn.execute(
+                    "INSERT INTO jogos (user_id, dezenas, data_cadastro) VALUES (?, ?, ?)",
+                    (uid, ",".join(sorted(selecionadas)), datetime.datetime.now().isoformat())
+                )
+            user_states.pop(uid, None)
+            temp_data.pop(uid, None)
+            await query.edit_message_text("✅ Jogo cadastrado com sucesso!")
+            await context.bot.send_message(chat_id=uid, text="Use o menu abaixo:", reply_markup=teclado_principal())
+            return
+
     if data.startswith("del:"):
         jogo_id = int(data.split(":")[1])
         with get_db() as conn:
             conn.execute("DELETE FROM jogos WHERE id = ? AND user_id = ?", (jogo_id, uid))
         await query.edit_message_text(f"🗑️ Jogo #{jogo_id} excluído com sucesso.")
-
-# Inicialização do bot
 
 def main():
     init_db()
