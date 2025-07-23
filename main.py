@@ -344,7 +344,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     init_db()
-    token = os.getenv("TELEGRAM_TOKEN")
+    token = os.getenv("BOT_TOKEN")
     if not token:
         print("❌ TELEGRAM_TOKEN não configurado no ambiente.")
         return
