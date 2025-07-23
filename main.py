@@ -158,7 +158,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("💳 Pagar R$10 via PIX", callback_data="pagar_pix")]
         ]
         await update.message.reply_text(
-            "👋 Olá! Para acessar o bot, é necessário realizar um pagamento de R$10 via PIX.",
+            "👋 Olá! Para acessar o bot, é necessário realizar um pagamento de R$5 via PIX.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         user_states.pop(uid, None)
